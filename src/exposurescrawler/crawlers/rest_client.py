@@ -7,9 +7,10 @@ class TableauRestClient:
     Thin wrapper around the official Tableau Server client.
     """
 
-    def __init__(self, url: str, username: str, password: str):
-        self.tableau_auth = TSC.TableauAuth(username, password)
+    def __init__(self, url: str, tableau_token: str, ):
+        self.tableau_auth = TSC.PersonalAccessTokenAuth(token_name='crawler', personal_access_token=tableau_token, site_id='loom')
         self.server = TSC.Server(url, use_server_version=True)
+        self.tableau_client = server.auth.sign_in(tableau_auth)
 
     @lru_cache(maxsize=None)
     def retrieve_workbook(self, workbook_id: str):
@@ -26,7 +27,6 @@ class TableauRestClient:
         return user
 
     def run_metadata_api(self, query: str):
-        print()
         with self.server.auth.sign_in(self.tableau_auth):
             response = self.server.metadata.query(query)
 

@@ -2,6 +2,7 @@ import pathlib
 from typing import Optional
 
 from exposurescrawler.tableau.models import WorkbookReference, WorkbookModelsMapping
+from exposurescrawler.tableau.rest_client import TableauRestClient
 from exposurescrawler.utils.logger import logger
 
 """
@@ -21,43 +22,13 @@ Link to my message on their forum: https://community.tableau.com/s/idea/0874T000
 CURRENT_FOLDER = pathlib.Path(__file__).parent.resolve()
 GRAPHQL_CUSTOM_SQL_QUERY_FILE = '_custom_sql_graphql_query.txt'
 GRAPHQL_NATIVE_SQL_QUERY_FILE = '_native_sql_graphql_query.txt'
-
-import tableauserverclient as TSC
-from functools import lru_cache
-
-
-class TableauRestClient:
-    """
-    Thin wrapper around the official Tableau Server client.
-    """
-
-    def __init__(self, url: str, tableau_token: str, tableau_server_url: str):
-        self.tableau_auth = TSC.PersonalAccessTokenAuth(token_name='crawler', personal_access_token=tableau_token, site_id='loom')
-        self.server = TSC.Server(tableau_server_url, use_server_version=True)
-
-    @lru_cache(maxsize=None)
-    def retrieve_workbook(self, workbook_id: str):
-        with self.server.auth.sign_in(self.tableau_auth):
-            workbook = self.server.workbooks.get_by_id(workbook_id)
-
-        return workbook
-
-    @lru_cache(maxsize=None)
-    def retrieve_user(self, user_id: str):
-        with self.server.auth.sign_in(self.tableau_auth):
-            user = self.server.users.get_by_id(user_id)
-
-        return user
-
-    def run_metadata_api(self, query: str):
-        print('local')
-        with self.server.auth.sign_in(self.tableau_auth):
-            response = self.server.metadata.query(query)
-
-        return response['data']
+def run_metadata_api(self, query: str):
+    with self.server.auth.sign_in(self.tableau_auth):
+        response = self.server.metadata.query(query)
+    return response['data']
 
 def retrieve_custom_sql(
-    tableau_auth, server,only_connection_type: Optional[str] = None
+    tableau_auth, server, only_connection_type: Optional[str] = None
 ) -> WorkbookModelsMapping:
     """
     Starts at CustomSQLTables and trace them back to workbooks.
@@ -88,12 +59,7 @@ def retrieve_custom_sql(
     logger().info(f'🔍 Found {len(workbooks_custom_sqls.keys())} workbooks with custom SQL')
 
     return workbooks_custom_sqls
-def run_metadata_api(tableau_auth, server, query: str):
-    print('local')
-    with server.auth.sign_in(tableau_auth):
-        response = server.metadata.query(query)
 
-    return response['data'] 
 
 def _fetch_custom_sql(tableau_auth, server):
     query_custom_sql = (CURRENT_FOLDER / GRAPHQL_CUSTOM_SQL_QUERY_FILE).read_text()
@@ -101,7 +67,7 @@ def _fetch_custom_sql(tableau_auth, server):
 
 
 def retrieve_native_sql(
-    tableau_auth, server, connection_type: Optional[str] = None
+    tableau_client: TableauRestClient, connection_type: str
 ) -> WorkbookModelsMapping:
     """
     When starting by workbooks -> embeddedDatasources -> upstreamTables, only DatabaseTables are

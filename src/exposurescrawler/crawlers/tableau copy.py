@@ -3,13 +3,7 @@ import logging
 import os
 from typing import Collection, List
 from unicodedata import name
-import pathlib
 from ruamel.yaml import YAML
-
-
-from exposurescrawler.tableau.models import WorkbookReference, WorkbookModelsMapping
-from exposurescrawler.tableau.rest_client import TableauRestClient
-from exposurescrawler.utils.logger import logger
 
 import click
 import tableauserverclient as TSC
@@ -18,9 +12,9 @@ from functools import lru_cache
 from exposurescrawler.dbt.exposure import DbtExposure
 from exposurescrawler.dbt.manifest import DbtManifest
 from manifest import DbtManifest
-from graphql_client import (
+from exposurescrawler.tableau.graphql_client import (
     retrieve_custom_sql,
-    retrieve_native_sql
+    retrieve_native_sql,
 )
 from exposurescrawler.tableau.models import WorkbookModelsMapping
 from rest_client import TableauRestClient
@@ -55,7 +49,7 @@ def _parse_tables_from_sql(workbooks_sqls: WorkbookModelsMapping, models) -> Wor
         all_found: List[dict] = []
 
         for custom_sql in custom_sqls:
-            print(custom_sql)
+            #print(custom_sql)
             if models_found_query := search_model_in_query(custom_sql, models):
                 all_found.extend(models_found_query.values())
 
@@ -74,17 +68,7 @@ def _parse_tables_from_sql(workbooks_sqls: WorkbookModelsMapping, models) -> Wor
     logger().info(f'⚙️ Found {len(output.keys())} workbooks with linked models')
     return output
 
-#def retrieve_workbook(tableau_auth, server, workbook_id: str):
-#    with server.auth.sign_in(tableau_auth):
-#        workbook = server.workbooks.get_by_id(workbook_id)
-#
-#    return workbook
-#
-#def retrieve_user(tableau_auth, server, user_id: str):
-#    with server.auth.sign_in(tableau_auth):
-#        user = server.users.get_by_id(user_id)
-#
-#    return user
+
 
 def tableau_crawler(
     manifest_path: str,
@@ -106,12 +90,11 @@ def tableau_crawler(
 
     # Retrieve all models
     models = manifest.retrieve_models_and_sources()
+    tableau_token = os.environ['TABLEAU_TOKEN']
+    tableau_server_url = os.environ['TABLEAU_URL']
 
-    tableau_server_url = 'https://us-west-2b.online.tableau.com/'
-    tableau_token = 'nyVud30iSxOMB9u4CvnzNQ==:jL8w4R1BCAkgM1bmrXszBBxK373CI2NM'
-    
     tableau_auth = TSC.PersonalAccessTokenAuth(token_name='crawler', personal_access_token=tableau_token, site_id='loom')
-    server = TSC.Server(tableau_server_url, use_server_version=True)
+    server = TSC.Server(tableau_server_url)
     tableau_client = server.auth.sign_in(tableau_auth)
     with server.auth.sign_in(tableau_auth):
     # Now you have a signed-in server object (server) that you can use for making API calls
@@ -123,7 +106,7 @@ def tableau_crawler(
     #tableau_client = TableauRestClient()
 
     # Retrieve custom SQLs and find model references
-    workbooks_custom_sqls = retrieve_custom_sql(tableau_client , 'snowflake')
+    workbooks_custom_sqls = retrieve_custom_sql(tableau_client, 'snowflake')
     workbooks_custom_sql_models = _parse_tables_from_sql(workbooks_custom_sqls, models)
 
     # Retrieve native SQLs and find model references
@@ -155,11 +138,9 @@ def tableau_crawler(
     # For every workbook and the models found, create exposures and add
     # to the manifest (in-memory)
 
-
-
     for workbook_reference, found in workbooks_models.items():
-        workbook = retrieve_workbook(tableau_auth, server,workbook_reference.id)
-        owner = retrieve_user(tableau_auth, server,workbook.owner_id)
+        workbook = tableau_client.retrieve_workbook(workbook_reference.id)
+        owner = tableau_client.retrieve_user(workbook.owner_id)
 
         if _should_ignore_workbook(workbook, tableau_projects_to_ignore):
             logger().debug(
@@ -168,14 +149,15 @@ def tableau_crawler(
             continue
 
         exposure = DbtExposure.from_tableau_workbook(dbt_package_name, workbook, owner, found)
-        
+        #print(exposure)
+
         import json
         test_raw = exposure.to_dict()
         test_name = test_raw.get("name")
         new_name = test_name.rsplit("_",1)[0]
         print(new_name)
-        file_name = '/Users/sandhya.yadav/Desktop/git-repo/dbt/loom-dbt/models/exposures/' + new_name + '.yml'
-        print(file_name)
+        file_name = '../../main/models/exposures/' + new_name + '.yml'
+        #print(file_name)
         ff = open(file_name, "w+")
         #f.write(str(exposure.to_dict()))
 
@@ -192,15 +174,20 @@ def tableau_crawler(
         }
         yaml.indent(sequence=4, offset=2)
         yaml.dump(yamlData, ff)
+
+
+        #f.write('\n')
+        #f.close()
         manifest.add_exposure(exposure, found)
 
     # Terminate the Tableau client
+    tableau_client.sign_out()
 
     # Persist the modified manifest
     logger().info('')
     logger().info(f'💾 Writing results to file: {manifest_path}')
-    manifest.save(manifest_path)
-    #manifest.save('/Users/sandhya.yadav/Desktop/dbt/loom-dbt/target/sandhya_log.txt')
+    #manifest.save(manifest_path)
+
 
 @click.command()
 @click.option(
